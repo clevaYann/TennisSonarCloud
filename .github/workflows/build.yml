@@ -1,39 +1,49 @@
 name: Java CI
-#
-on: push
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
-    name : Integration Continue = tests + build + generation rapports AUTO
+    name: Integration Continue = tests + build + generation rapports AUTO
     runs-on: ubuntu-latest
     permissions:
-      checks: write
+      contents: read
+      checks: write        # check runs "JUnit Tests" et "Code Coverage"
+      pull-requests: write # commentaires de couverture sur les PR
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up JDK 18
-        uses: actions/setup-java@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          java-version: '18'
-          distribution: 'corretto'
-      - name: Validate Gradle wrapper
-        uses: gradle/wrapper-validation-action@v1
-        #uses: gradle/wrapper-validation-action@e6e38bacfdf1a337459f332974bb2327a31aaf4b
-      - name: Setup Gradle
-        uses: gradle/gradle-build-action@v2
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle (validation du wrapper + cache)
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Make gradlew executable
-        run:  chmod +x ./gradlew
-      - name: Build & test #and compute JaCoCo reports
-        run: ./gradlew build JacocoTestReport
-      - name: Rapport de tests
-        uses: dorny/test-reporter@v1
+        run: chmod +x ./gradlew
+
+      - name: Build & tests + rapport JaCoCo (XML + HTML)
+        run: ./gradlew build jacocoTestReport
+
+      - name: Rapport de tests JUnit
+        uses: dorny/test-reporter@v2
         if: success() || failure()
         with:
           name: JUnit Tests
           path: build/test-results/test/TEST-*.xml
           reporter: java-junit
-      - name: JaCoCo Code Coverage Report
+
+      - name: Rapport de couverture JaCoCo
         id: jacoco_reporter
         uses: PavanMudigonda/jacoco-reporter@v4.8
+        if: success() || failure()
         with:
           coverage_results_path: build/reports/jacoco/test/jacocoTestReport.xml
           coverage_report_name: Coverage
@@ -43,3 +53,18 @@ jobs:
           minimum_coverage: 80
           fail_below_threshold: false
           publish_only_summary: false
+
+      - name: Couverture dans le résumé du job
+        if: success() || failure()
+        run: |
+          echo "### Couverture de code (JaCoCo)" >> $GITHUB_STEP_SUMMARY
+          echo "| Couverture | Lignes couvertes | Lignes manquées | Total |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| ${{ steps.jacoco_reporter.outputs.coverage_percentage }}% | ${{ steps.jacoco_reporter.outputs.covered_lines }} | ${{ steps.jacoco_reporter.outputs.missed_lines }} | ${{ steps.jacoco_reporter.outputs.total_lines }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Publication du rapport HTML JaCoCo (artifact)
+        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: jacoco-report
+          path: build/reports/jacoco/test/
